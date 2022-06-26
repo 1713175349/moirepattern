@@ -1,3 +1,4 @@
+# Introduction
 生成二维材料双层的moire堆叠转角结构，
 要求：两个单层结构的真空层方向在z轴，二维延申方向在xy平面
 
@@ -25,7 +26,13 @@ optional arguments:
   --needshift           need shift
 ```
 
+# Install
+
+`pip install .`
+
+
 for example:
 ```
 moiregenerate-cmd -o CrI3 -r 0 60 10000 -m 8 --distance 3.4 -e 0.04 CR1.vasp CR1.vasp
 ```
+
