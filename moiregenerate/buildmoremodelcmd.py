@@ -372,7 +372,7 @@ def main():
     a.getallchoose() #获取所有可能的超胞
     a.epsilon=args.epsilon #超胞匹配的精度 
 
-    thetalist=np.linspace(args.range[0],args.range[1]*np.pi/180,int(args.range[2])) #搜索的角度范围
+    thetalist=np.linspace(args.range[0]*np.pi/180,args.range[1]*np.pi/180,int(args.range[2])) #搜索的角度范围
     a.dtheta=thetalist[1]-thetalist[0] #搜索的角度步长
 
     kexing=[]
