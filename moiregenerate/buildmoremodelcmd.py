@@ -349,7 +349,8 @@ def main():
     parser.add_argument("files", type=str, default=None,nargs=2, help='file name')
     parser.add_argument('-o', '--output', type=str, default='tmpoutput', help='output dir')
     parser.add_argument("-r","--range",type=float,default=[0,180,1000],nargs=3,help="theta range")
-    parser.add_argument("-e","--epsilon",type=float,default=0.04,help="epsilon")
+    parser.add_argument("-e","--epsilon",type=float,default=0.04,help="epsilon 晶格矢量允许误差")
+    parser.add_argument("-l","--lepsilon",type=float,default=0.04,help="lepsilon 晶格面积误差")
     parser.add_argument("-m","--maxm",type=int,default=10,help="maxmium supercell size,搜索的时候建议依次增大，可以避免找不到小原胞")
     parser.add_argument("--distance",type=float,default=3.04432,help="distance between two supercells")
     parser.add_argument("--needshift",action='store_true',help="need shift")
@@ -371,7 +372,7 @@ def main():
     a.maxm=args.maxm #最大超胞大小
     a.getallchoose() #获取所有可能的超胞
     a.epsilon=args.epsilon #超胞匹配的精度 
-
+    a.lepsilon=args.lepsilon #超胞匹配的精度
     thetalist=np.linspace(args.range[0]*np.pi/180,args.range[1]*np.pi/180,int(args.range[2])) #搜索的角度范围
     a.dtheta=thetalist[1]-thetalist[0] #搜索的角度步长
 

@@ -19,6 +19,7 @@ class moredata(object):
         self.B0=np.array([[1,2],[2,1]]) # B0 为初始的B，不转动时的格矢
         self.theta=0
         self.epsilon=0.01
+        self.lepsilon=0.01
         self.maxm=10
         self.dtheta=np.pi/180*3
     
@@ -50,6 +51,10 @@ class moredata(object):
         dis= np.linalg.norm(dis0,axis=1)/np.linalg.norm(np.dot(allchoose2,self.B),axis=1)
         # dis=np.linalg.norm(np.dot(result1,self.A),axis=1)/np.linalg.norm(np.dot(result,self.A),axis=1)
         mns = self.allchoose[dis<self.epsilon]
+        
+        
+        
+        
         cart = np.dot(mns,self.A)
 
         if mns.shape[0]<2:
@@ -69,7 +74,7 @@ class moredata(object):
             #print("mismatch: ",areas[index[i]],self.getmismactch(np.array([mns[0],mns[index[i]]]),self.theta))
             latticemis = self.getmismactch(np.array([mns[0],mns[index[i]]]),self.theta)
             
-            if latticemis < self.epsilon:
+            if latticemis < self.lepsilon:
                 latticemis0=self.getmismactch(np.array([mns[0],mns[index[i]]]),self.theta-self.dtheta)
                 latticemis1=self.getmismactch(np.array([mns[0],mns[index[i]]]),self.theta+self.dtheta)
                 # print("mismatch: ",latticemis0-latticemis,latticemis1)
@@ -92,20 +97,38 @@ class moredata(object):
         # dis=np.linalg.norm(np.dot(result1,self.A),axis=1)/np.linalg.norm(np.dot(result,self.A),axis=1)
         mns = self.allchoose[dis<self.epsilon]
         dis=dis[dis<self.epsilon]
-        mns=mns[np.argsort(dis)]
+        #mns=mns[np.argsort(dis)]
         lengths=np.linalg.norm(np.dot(mns,self.A),axis=1)
-        dis=dis[np.argsort(dis)]
-        # mns=mns[np.argsort((lengths/np.max(lengths)+100000000000000000000000000000*dis/np.max(dis)))]
-        #求最小的那个点附近的最短格矢量
-        minlenth=lengths[0]
-        minindex=0
+        
+        # dis=dis[np.argsort(dis)]
+        # # mns=mns[np.argsort((lengths/np.max(lengths)+100000000000000000000000000000*dis/np.max(dis)))]
+        # #求最小的那个点附近的最短格矢量
+        # minlenth=lengths[0]
+        # minindex=0
        
-        for i in range(0,len(mns)):
-            if lengths[i]<minlenth and np.abs(dis[i]-dis[0])<0.01:
-                minlenth=lengths[i]
-                minindex=i
-        # swap to 0
-        mns[0],mns[minindex] = mns[minindex],mns[0]
+        # for i in range(0,len(mns)):
+        #     if lengths[i]<minlenth and np.abs(dis[i]-dis[0])<0.01:
+        #         minlenth=lengths[i]
+        #         minindex=i
+        # # swap to 0
+        
+        
+        # mns[0],mns[minindex] = mns[minindex],mns[0]
+        
+        mns=mns[np.argsort(lengths)]
+        
+        outmns=[]
+        for i in mns:
+            coline=False
+            for j in outmns:
+                if np.abs(np.cross(i,j)/np.linalg.norm(i)/np.linalg.norm(j))<0.001:
+                    coline=True
+                    break
+            if not coline:
+                outmns.append(i)
+                
+        mns=np.array(mns)  
+        
         # print(minindex)
         cart = np.dot(mns,self.A)
 
@@ -118,9 +141,15 @@ class moredata(object):
         areas=np.abs(areas)
         area0=np.abs(np.linalg.det(self.A))
         lll = np.linalg.norm(cart,axis=1)
-        sortdep=areas+area0/2*lll/self.lengthOfChoose[-1]
+        
+        angle=np.arcsin(areas/lll/lll[0])
+        
+        # sortdep=(areas-areas.min())/(areas.max()-areas.min())
+        # sortdep[0]=sortdep.max()*100
+        sortdep=areas#+area0/2*lll/self.lengthOfChoose[-1]
         index=np.arange(len(areas))
-        index=index[sortdep>area0*0.8]
+        ##index=index[angle>np.pi/7]
+        index=index[np.logical_and(angle>np.pi/7,lll/lll[0]<3.2)] #防止歧变晶格
         index=index[np.argsort(sortdep[index])]
         
         for i in range(0,len(index)):
@@ -128,7 +157,7 @@ class moredata(object):
             #print("mismatch: ",areas[index[i]],self.getmismactch(np.array([mns[0],mns[index[i]]]),self.theta))
             latticemis = self.getmismactch(np.array([mns[0],mns[index[i]]]),self.theta)
             
-            if latticemis < self.epsilon:
+            if latticemis < self.lepsilon:
                 latticemis0=self.getmismactch(np.array([mns[0],mns[index[i]]]),self.theta-self.dtheta)
                 latticemis1=self.getmismactch(np.array([mns[0],mns[index[i]]]),self.theta+self.dtheta)
                 # print("mismatch: ",latticemis0-latticemis,latticemis1)
