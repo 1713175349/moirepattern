@@ -21,6 +21,9 @@ class moredata(object):
         self.epsilon=0.01
         self.lepsilon=0.01
         self.maxm=10
+        self.minangle=np.pi/7
+        self.maxLrate=2.2
+        
         self.dtheta=np.pi/180*3
     
     def changetheta(self,theta):
@@ -149,7 +152,8 @@ class moredata(object):
         sortdep=areas+area0/2*lll/self.lengthOfChoose[-1]
         index=np.arange(len(areas))
         ##index=index[angle>np.pi/7]
-        index=index[np.logical_and(angle>np.pi/7,lll/lll[0]<2.2,areas>0.1)] #防止歧变晶格
+        
+        index=index[np.logical_and(angle>self.minangle,lll/lll[0]<self.maxLrate,areas>0.1)] #防止歧变晶格
         index=index[np.argsort(sortdep[index])]
         # if np.allclose(self.theta,np.pi/6,np.pi/180/2):
         #     print(mns[index].__repr__(),areas[index],sortdep[index])
