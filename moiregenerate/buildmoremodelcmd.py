@@ -388,7 +388,7 @@ def main():
                 outs.append((res.x,area,mn))
                 pltdata.append([res.x,area])
                 if res.success:
-                    print(theta)
+                    #print("success:",theta/np.pi*180,res.x/np.pi*180,mn)
                     kexing.append((res.x,res.fun,mn))
         except BaseException as e:
             #print(e)
@@ -397,11 +397,11 @@ def main():
     kk=0
     informations={}
     for k in kexing:
-        print(kk)
+        print(kk,k[0]/np.pi*180,k[2])
         kk+=1
         try :
             m=build_moire_pattern(b,b00,k[0],k[2],args.distance,relax_shift=args.needshift)
-            filename="POSCAR-{k1:.3f}-{rrr:.2f}.vasp".format(k1=k[0]*180/np.pi,rrr=k[1]*100)
+            filename="POSCAR-{k1:.10f}-{rrr:.3f}.vasp".format(k1=k[0]*180/np.pi,rrr=k[1]*100)
             informations0=build_moire_patterninformation(b,b00,k[0],k[2],args.distance,relax_shift=args.needshift)
             informations0['theta']=k[0]
             informations0['epsilon']=k[1]

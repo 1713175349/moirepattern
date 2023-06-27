@@ -116,18 +116,18 @@ class moredata(object):
         # mns[0],mns[minindex] = mns[minindex],mns[0]
         
         mns=mns[np.argsort(lengths)]
-        
-        outmns=[]
-        for i in mns:
-            coline=False
-            for j in outmns:
-                if np.abs(np.cross(i,j)/np.linalg.norm(i)/np.linalg.norm(j))<0.001:
-                    coline=True
-                    break
-            if not coline:
-                outmns.append(i)
+        # outmns=[]
+        # for i in mns:
+        #     coline=False
+        #     for j in outmns:
+        #         if np.abs(np.cross(i,j)/np.linalg.norm(i)/np.linalg.norm(j))<0.001:
+        #             coline=True
+        #             break
+        #     if not coline:
+        #         outmns.append(i)
                 
-        mns=np.array(mns)  
+        # #print(len(mns)-len(outmns))
+        # mns=np.array(outmns)  
         
         # print(minindex)
         cart = np.dot(mns,self.A)
@@ -146,12 +146,13 @@ class moredata(object):
         
         # sortdep=(areas-areas.min())/(areas.max()-areas.min())
         # sortdep[0]=sortdep.max()*100
-        sortdep=areas#+area0/2*lll/self.lengthOfChoose[-1]
+        sortdep=areas+area0/2*lll/self.lengthOfChoose[-1]
         index=np.arange(len(areas))
         ##index=index[angle>np.pi/7]
-        index=index[np.logical_and(angle>np.pi/7,lll/lll[0]<3.2)] #防止歧变晶格
+        index=index[np.logical_and(angle>np.pi/7,lll/lll[0]<2.2,areas>0.1)] #防止歧变晶格
         index=index[np.argsort(sortdep[index])]
-        
+        # if np.allclose(self.theta,np.pi/6,np.pi/180/2):
+        #     print(mns[index].__repr__(),areas[index],sortdep[index])
         for i in range(0,len(index)):
             # newab.append(mns[index[i]])
             #print("mismatch: ",areas[index[i]],self.getmismactch(np.array([mns[0],mns[index[i]]]),self.theta))
@@ -167,6 +168,7 @@ class moredata(object):
                     break
         if len(newab)<2:
             return None,0
+        #print("matched:",newab)
         return np.array(newab[:2]),matcharea
 
     def plotvector(self,mn,theta):
