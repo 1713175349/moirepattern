@@ -388,7 +388,7 @@ def main():
                 outs.append((res.x,area,mn))
                 pltdata.append([res.x,area])
                 if res.success:
-                    #print("success:",theta/np.pi*180,res.x/np.pi*180,mn)
+                    print("success:",theta/np.pi*180,res.x/np.pi*180,mn)
                     kexing.append((res.x,res.fun,mn))
         except BaseException as e:
             #print(e)

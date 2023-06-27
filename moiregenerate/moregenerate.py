@@ -156,7 +156,7 @@ class moredata(object):
         index=index[np.logical_and(angle>self.minangle,lll/lll[0]<self.maxLrate,areas>0.1)] #防止歧变晶格
         index=index[np.argsort(sortdep[index])]
         # if np.allclose(self.theta,np.pi/6,np.pi/180/2):
-        #     print(mns[index].__repr__(),areas[index],sortdep[index])
+        #print(mns[0],mns[index].__repr__(),areas[index],sortdep[index])
         for i in range(0,len(index)):
             # newab.append(mns[index[i]])
             #print("mismatch: ",areas[index[i]],self.getmismactch(np.array([mns[0],mns[index[i]]]),self.theta))
