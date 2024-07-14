@@ -1,7 +1,5 @@
 #用于构建摩尔纹结构，对输入文件要求z轴为真空层方向，需要给定层间距
 
-from email import parser
-
 import ase.io as aio
 from ase.build import supercells,sort
 from ase.visualize import view
@@ -341,6 +339,236 @@ def build_moire_pattern(a:Atoms,b:Atoms,theta,newvec,layer_thickness,shift=[0,0]
     #print(moiremodel.get_chemical_symbols())
     return moiremodel
 
+
+def build_moire_pattern_nep(a:Atoms,b:Atoms,theta,newvec,layer_thickness,shift=[0,0],relax_shift=True,innewB=False,vacuum_thickness=20,calc=None):
+    
+    if np.linalg.det(newvec)<0:
+        newvec=np.array([newvec[1],newvec[0]])
+
+    shift=np.array(shift)
+    cell1=a.get_cell().array
+    cell2=b.get_cell().array
+    A=cell1[:2,:2]
+    B=cell2[:2,:2]
+    R=get_rotation_matrix2d(theta)
+    R3=get_rotation_matrix(theta)
+    B=np.dot(R,B.T).T
+
+
+    nA=np.dot(newvec,A)
+    newcm=np.dot(newvec,np.dot(A,np.linalg.inv(B)))
+    nB=np.dot(np.round(newcm),B)
+
+    ## 为了减少失配度度，得到一个新的单位cell
+    nD = (nA+nB)/2
+    
+    transvec1 = np.dot(np.linalg.inv(nA),nD)
+    transvec2 = np.dot(np.linalg.inv(nB),nD)
+
+    transvec1 = np.array([[transvec1[0,0],transvec1[0,1],0],[transvec1[1,0],transvec1[1,1],0],[0,0,1]])
+    transvec2 = np.array([[transvec2[0,0],transvec2[0,1],0],[transvec2[1,0],transvec2[1,1],0],[0,0,1]])
+
+    # tranvec=np.dot(np.linalg.inv(nB),nA) # 将转动后B胞中的坐标变到A胞中（用于处理晶格失配）
+    # tranvec=np.array([[tranvec[0,0],tranvec[0,1],0],[tranvec[1,0],tranvec[1,1],0],[0,0,1]])
+
+    layer_thickness1 = np.max(a.positions[:,2])- np.min(a.positions[:,2])
+    layer_thickness2 = np.max(b.positions[:,2])- np.min(b.positions[:,2])
+    newzlength = layer_thickness1+layer_thickness2+layer_thickness+vacuum_thickness #20位
+
+    moiremodel=Atoms(cell=[[nD[0][0],nD[0][1],0],[nD[1][0],nD[1][1],0],[0,0,newzlength]],pbc=True)
+
+    sa=build_nsupercell(a,[[newvec[0][0],newvec[0][1],0],[newvec[1][0],newvec[1][1],0],[0,0,1]])
+    newcm=np.round(newcm)
+    sb=build_nsupercell(b,[[newcm[0][0],newcm[0][1],0],[newcm[1][0],newcm[1][1],0],[0,0,1]])
+    
+    if (sa.get_global_number_of_atoms()!=sb.get_global_number_of_atoms()):
+        print('Warning: the number of atoms in two supercells are not equal',sa.get_chemical_formula(),sb.get_chemical_formula())
+    sb.positions=np.dot(R3,sb.positions.T).T
+    ncell2=np.dot(R3,sb.get_cell().array.T).T
+    sb.set_cell(ncell2)
+    sazmin=np.min(sa.get_positions()[:,2])
+    sa.positions[:,2]+=(1-sazmin) # 将sa移动到高1埃的位置
+    sa.positions=np.dot(sa.positions,transvec1) # 将转动后A胞中的坐标变到moire胞中
+    sazmax=np.max(sa.get_positions()[:,2])
+    
+    moiremodel.extend(sa)
+
+    
+    if relax_shift:
+
+        """优化层间相对位置，采用简单的lj势能"""
+        def shift_energy(shift1):
+            #print(shift1)
+            sb1=sb.copy()
+            moiremodeltmp=moiremodel.copy()
+            shift1=np.dot(shift1,nB)
+            sb1.positions=np.dot(sb1.positions,transvec2)
+            sb1zmin=np.min(sb1.get_positions()[:,2])
+            shift1=np.array([shift1[0],shift1[1],-sb1zmin+sazmax+layer_thickness])
+            sb1.positions+=np.broadcast_to(shift1,sb1.positions.shape)
+            moiremodeltmp.extend(sb1)
+            moiremodeltmp.wrap()
+            moiremodeltmp=supercells.make_supercell(moiremodeltmp,np.array([[3,0,0],[0,3,0],[0,0,1]])) #扩胞，防止错误
+            moiremodeltmp=sort(moiremodeltmp)
+            moiremodeltmp.set_calculator(calc)
+            return moiremodeltmp.get_potential_energy()
+
+        rs=optimize.minimize(shift_energy,np.array([0.2,0.3]),bounds=[(0,1),(0,1)],method='Nelder-Mead')
+        print(rs.x,rs)
+        shift=rs.x
+    if innewB or relax_shift:
+        shift=np.dot(shift,nB)
+    else:
+        shift=np.dot(shift,B)
+    sb.positions=np.dot(sb.positions,transvec2)
+    sbzmin=np.min(sb.get_positions()[:,2])
+    shift=np.array([shift[0],shift[1],-sbzmin+sazmax+layer_thickness])
+    sb.positions+=np.broadcast_to(shift,sb.positions.shape)
+    moiremodel.extend(sb)
+
+
+    moiremodel=sort(moiremodel)
+    #print(moiremodel.get_chemical_symbols())
+    return moiremodel
+
+def create_matched_structure(atoms1: Atoms, atoms2: Atoms,maxm:int=10, layer_thickness=2.5, angle: float=0., mismatch: float=0.04, vacuum: float=20) -> Atoms:
+    """
+    创建两个原子结构的匹配界面结构。
+
+    参数:
+    atoms1 (Atoms): 第一个原子结构
+    atoms2 (Atoms): 第二个原子结构
+    angle (float): 旋转角度（度）
+    mismatch (float): 允许的晶格失配度
+    vacuum (float): 真空层厚度（埃）
+
+    返回:
+    Atoms: 匹配的界面结构
+    """
+    # 将角度转换为弧度
+    theta = angle * np.pi / 180
+
+    # 创建 moredata 对象并设置参数
+    a = moredata()
+    a.A = atoms1.get_cell().array[:2, :2]
+    a.B0 = atoms2.get_cell().array[:2, :2]
+    a.maxm = maxm  # 最大超胞大小
+    a.epsilon = mismatch  # 晶格矢量允许误差
+    a.lepsilon = mismatch  # 晶格面积误差
+    a.maxLrate=10
+    # 获取所有可能的超胞
+    a.getallchoose()
+
+    # 尝试找到匹配的结构
+    a.changetheta(theta)
+    mn, area = a.getminmnplot()
+    
+    if mn.shape != (2, 2):
+        raise ValueError("无法找到匹配的结构")
+
+    # res = a.relaxwithmn(mn)
+    # if not res.success:
+    #     raise ValueError("无法找到匹配的结构")
+
+    # # 计算层间距离
+    # layer_thickness1 = np.max(atoms1.positions[:, 2]) - np.min(atoms1.positions[:, 2])
+    # layer_thickness2 = np.max(atoms2.positions[:, 2]) - np.min(atoms2.positions[:, 2])
+    # interlayer_distance = (layer_thickness1 + layer_thickness2) / 2
+
+    # 创建匹配的结构
+    matched_structure = build_moire_pattern(
+        atoms1, atoms2, angle, mn, layer_thickness, 
+        relax_shift=False, vacuum_thickness=vacuum
+    )
+
+    return matched_structure
+
+
+
+def main_nep():
+
+    import argparse
+    parser = argparse.ArgumentParser(description='generate a structure')
+    parser.add_argument("files", type=str, default=None,nargs=2, help='file name')
+    parser.add_argument('-o', '--output', type=str, default='tmpoutput', help='output dir')
+    parser.add_argument("-r","--range",type=float,default=[0,180,1000],nargs=3,help="theta range")
+    parser.add_argument("-e","--epsilon",type=float,default=0.04,help="epsilon 晶格矢量允许误差")
+    parser.add_argument("-l","--lepsilon",type=float,default=0.04,help="lepsilon 晶格面积误差")
+    parser.add_argument("-m","--maxm",type=int,default=10,help="maxmium supercell size,搜索的时候建议依次增大，可以避免找不到小原胞")
+    parser.add_argument("--distance",type=float,default=3.04432,help="distance between two supercells")
+    parser.add_argument("--needshift",action='store_true',help="need shift")
+    args=parser.parse_args()
+    from pynep.calculate import NEP
+    clc=NEP("nep.txt")
+    if args.files is None or len(args.files)!=2:
+        print("please input two files")
+        exit()
+    if not os.path.exists(args.output):
+        os.mkdir(args.output)
+
+    b00=aio.read(args.files[1])
+    b=aio.read(args.files[0])
+    print(args.files[0],b.get_cell().lengths(), b.get_cell().angles())
+    print(args.files[1],b00.get_cell().lengths(), b00.get_cell().angles())
+    a=moredata()
+
+    a.A=b.get_cell().array[:2,:2]
+    a.B0=b00.get_cell().array[:2,:2]
+    a.maxm=args.maxm #最大超胞大小
+    a.getallchoose() #获取所有可能的超胞
+    a.epsilon=args.epsilon #超胞匹配的精度 
+    a.lepsilon=args.lepsilon #超胞匹配的精度
+    thetalist=np.linspace(args.range[0]*np.pi/180,args.range[1]*np.pi/180,int(args.range[2])) #搜索的角度范围
+    a.dtheta=thetalist[1]-thetalist[0] #搜索的角度步长
+
+    kexing=[]
+    outs=[]
+    pltdata=[]
+    for theta in thetalist:   
+        try :
+            a.changetheta(theta)
+            mn,area=a.getminmnplot()
+            if mn.shape==(2,2):
+                res=a.relaxwithmn(mn)
+                outs.append((res.x,area,mn))
+                pltdata.append([res.x,area])
+                if res.success:
+                    print("success:",theta/np.pi*180,res.x/np.pi*180,mn)
+                    kexing.append((res.x,res.fun,mn))
+        except BaseException as e:
+            #print(e)
+            continue     
+    print(kexing)
+    kk=0
+    informations={}
+    for k in kexing:
+        print(kk,k[0]/np.pi*180,k[2])
+        kk+=1
+        try :
+            m=build_moire_pattern_nep(b,b00,k[0],k[2],args.distance,relax_shift=args.needshift,calc=clc)
+            filename="POSCAR-{k1:.10f}-{rrr:.3f}.vasp".format(k1=k[0]*180/np.pi,rrr=k[1]*100)
+            informations0=build_moire_patterninformation(b,b00,k[0],k[2],args.distance,relax_shift=args.needshift)
+            informations0['theta']=k[0]
+            informations0['epsilon']=k[1]
+            informations[filename]=informations0
+            
+
+            m.write(os.path.join(args.output,filename),format="vasp",direct=True,wrap=True)
+        except BaseException as e:
+            print(e)
+            continue
+
+    import json
+
+    if os.path.exists(os.path.join(args.output,"informations.json")):
+        with open(os.path.join(args.output,"informations.json"),'r') as f:
+            informationsold=json.load(f)
+            informations1=informationsold.update(informations)
+            informations=informationsold
+    with open(os.path.join(args.output,"informations.json"),'w') as f:
+        json.dump(informations,f)
+    # aa=(build_nsupercell(a,np.array([[2,1,0],[0,1,0],[0,0,1]])))
+    # aa.write("POSCAR.vasp")
 
 def main():
 

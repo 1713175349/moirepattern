@@ -3,7 +3,6 @@ from turtle import color
 from xmlrpc.client import NOT_WELLFORMED_ERROR
 import numpy as np
 import scipy.optimize as opt
-from sklearn.preprocessing import scale
 
 
 #逆时针旋转一个二维向量
@@ -22,7 +21,7 @@ class moredata(object):
         self.lepsilon=0.01
         self.maxm=10
         self.minangle=np.pi/7
-        self.maxLrate=2.2
+        self.maxLrate=3.2
         
         self.dtheta=np.pi/180*3
     
@@ -102,7 +101,6 @@ class moredata(object):
         dis=dis[dis<self.epsilon]
         #mns=mns[np.argsort(dis)]
         lengths=np.linalg.norm(np.dot(mns,self.A),axis=1)
-        
         # dis=dis[np.argsort(dis)]
         # # mns=mns[np.argsort((lengths/np.max(lengths)+100000000000000000000000000000*dis/np.max(dis)))]
         # #求最小的那个点附近的最短格矢量
@@ -119,6 +117,7 @@ class moredata(object):
         # mns[0],mns[minindex] = mns[minindex],mns[0]
         
         mns=mns[np.argsort(lengths)]
+        
         # outmns=[]
         # for i in mns:
         #     coline=False
@@ -145,7 +144,7 @@ class moredata(object):
         area0=np.abs(np.linalg.det(self.A))
         lll = np.linalg.norm(cart,axis=1)
         
-        angle=np.arcsin(areas/lll/lll[0])
+        angle=np.abs(np.arcsin(areas/lll/lll[0])) # 这个角度可能不对可能需要取绝对值
         
         # sortdep=(areas-areas.min())/(areas.max()-areas.min())
         # sortdep[0]=sortdep.max()*100
@@ -153,7 +152,8 @@ class moredata(object):
         index=np.arange(len(areas))
         ##index=index[angle>np.pi/7]
         
-        index=index[np.logical_and(angle>self.minangle,lll/lll[0]<self.maxLrate,areas>0.1)] #防止歧变晶格
+        #index=index[np.logical_and(angle>self.minangle,lll/lll[0]<self.maxLrate,areas>0.1)] #防止歧变晶格
+        index=index[np.logical_and(angle>self.minangle,areas>0.1)] #防止歧变晶格
         index=index[np.argsort(sortdep[index])]
         # if np.allclose(self.theta,np.pi/6,np.pi/180/2):
         #print(mns[0],mns[index].__repr__(),areas[index],sortdep[index])
@@ -173,6 +173,49 @@ class moredata(object):
         if len(newab)<2:
             return None,0
         #print("matched:",newab)
+        return np.array(newab[:2]),matcharea
+    
+    def getminmn_one(self):
+        C=np.dot(self.A,np.linalg.inv(self.B))
+
+        
+        result=self.allchoose.dot(C)
+        result1=np.round(result)-result
+
+        allchoose2 = np.round(result)
+        dis0=(np.dot(allchoose2,self.B)-np.dot(self.allchoose,self.A))
+        dis= np.linalg.norm(dis0,axis=1)/np.linalg.norm(np.dot(allchoose2,self.B),axis=1)
+        # dis=np.linalg.norm(np.dot(result1,self.A),axis=1)/np.linalg.norm(np.dot(result,self.A),axis=1)
+        mns = self.allchoose[dis<self.epsilon]
+        dis=dis[dis<self.epsilon]
+        #mns=mns[np.argsort(dis)]
+        lengths=np.linalg.norm(np.dot(mns,self.A),axis=1)
+        
+        
+        mns=mns[np.argsort(lengths)]
+        
+        cart = np.dot(mns,self.A)
+
+
+
+        if mns.shape[0]<2:
+            return None
+        newab=[mns[0]]
+        areas=np.cross(cart[0],cart)
+        areas=np.abs(areas)
+        area0=np.abs(np.linalg.det(self.A))
+        lll = np.linalg.norm(cart,axis=1)
+        
+        angle=np.abs(np.arcsin(areas/lll/lll[0]))
+        
+        sortdep=areas+area0/2*lll/self.lengthOfChoose[-1]
+        index=np.arange(len(areas))
+        ##index=index[angle>np.pi/7]
+        
+        index=index[np.logical_and(angle>self.minangle,lll/lll[0]<self.maxLrate,areas>0.1)] #防止歧变晶格
+        index=index[np.argsort(sortdep[index])]
+        newab.append(mns[index[0]])
+        matcharea=areas[index[0]]
         return np.array(newab[:2]),matcharea
 
     def plotvector(self,mn,theta):
@@ -241,6 +284,7 @@ class moredata(object):
         # res=opt.minimize(fun,np.array([theta]),bounds=[(theta-self.dtheta,theta+self.dtheta)],method="COBYLA")
         res= opt.minimize_scalar(fun,method="Golden",bounds=(0,np.pi))
         return res
+
 
 
 

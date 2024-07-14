@@ -9,6 +9,6 @@ setup(
     license="MIT",
     keywords="moire pattern",
     package=["moiregenrate"],
-    scripts=["bin/moiregenerate-cmd"],
+    scripts=["bin/moiregenerate-cmd","bin/moiregenerate-cmd-nep"],
     install_requires=["numpy","matplotlib","ase"],
 )
