@@ -196,6 +196,7 @@ def build_nsupercel_(a:Atoms,P):
 from ase.calculators import lammpsrun
 from scipy import optimize
 #set calculator
+calc=None
 # calc=lammpsrun.LAMMPS(command="/home/zln/lammps-stable_29Sep2021_update2/build/lmp",
 #     parameters={'units':'metal','pair_style':'lj/cut 11','pair_coeff':['* * 10 3.18 12']},
 # )
@@ -552,8 +553,8 @@ def main_nep():
             informations0['epsilon']=k[1]
             informations[filename]=informations0
             
-
-            m.write(os.path.join(args.output,filename),format="vasp",direct=True,wrap=True)
+            m.wrap()
+            m.write(os.path.join(args.output,filename),format="vasp",direct=True)
         except BaseException as e:
             print(e)
             continue
@@ -634,9 +635,8 @@ def main():
             informations0['theta']=k[0]
             informations0['epsilon']=k[1]
             informations[filename]=informations0
-            
-
-            m.write(os.path.join(args.output,filename),format="vasp",direct=True,wrap=True)
+            m.wrap()
+            m.write(os.path.join(args.output,filename),format="vasp",direct=True)
         except BaseException as e:
             print(e)
             continue
