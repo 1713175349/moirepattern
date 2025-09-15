@@ -353,7 +353,7 @@ def build_moire_pattern(a:Atoms,b:Atoms,theta,newvec,layer_thickness,shift=[0,0]
     moiremodel=sort(moiremodel)
     from ase.constraints import FixAtoms
     moiremodel.set_constraint(FixAtoms(np.where(moiremodel.arrays["fix_atoms"]==1)[0]))
-    print("moire",moiremodel.constraints)
+    # print("moire",moiremodel.constraints)
     #print(moiremodel.get_chemical_symbols())
     return moiremodel
 
