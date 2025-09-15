@@ -82,6 +82,19 @@ def build_nsupercell(a:Atoms,P):
     '''
     通过给定的矩阵P构建表面结构,可以构建一些根号超胞
     '''
+    from ase.build import make_supercell
+    from ase.constraints import FixAtoms
+    a=a.copy()
+    fixed_index=np.zeros(len(a),dtype=np.int32)
+    for i in a.constraints:
+        if isinstance(i,FixAtoms):
+            fixed_index[i.get_indices()]=1
+    a.arrays["fix_atoms"]=fixed_index
+    out=make_supercell(a,P)
+    # out.set_constraint(FixAtoms(np.where(out.arrays["fix_atoms"]==1)[0]))
+    # print(out.constraints)
+    return out
+    
     a=a.copy()
     P=np.array(P)
     a.wrap()
@@ -301,6 +314,7 @@ def build_moire_pattern(a:Atoms,b:Atoms,theta,newvec,layer_thickness,shift=[0,0]
     sazmax=np.max(sa.get_positions()[:,2])
     
     moiremodel.extend(sa)
+    print(moiremodel.constraints)
 
     
     if relax_shift:
@@ -337,6 +351,9 @@ def build_moire_pattern(a:Atoms,b:Atoms,theta,newvec,layer_thickness,shift=[0,0]
 
 
     moiremodel=sort(moiremodel)
+    from ase.constraints import FixAtoms
+    moiremodel.set_constraint(FixAtoms(np.where(moiremodel.arrays["fix_atoms"]==1)[0]))
+    print("moire",moiremodel.constraints)
     #print(moiremodel.get_chemical_symbols())
     return moiremodel
 
@@ -429,6 +446,7 @@ def build_moire_pattern_nep(a:Atoms,b:Atoms,theta,newvec,layer_thickness,shift=[
 
 
     moiremodel=sort(moiremodel)
+    
     #print(moiremodel.get_chemical_symbols())
     return moiremodel
 
@@ -503,12 +521,19 @@ def main_nep():
     clc=NEP("nep.txt")
     if args.files is None or len(args.files)!=2:
         print("please input two files")
-        exit()
+        from ase.build import mx2
+        b00=mx2(vacuum=15)
+        b00.pbc=True
+        b=b00.copy()
+    else:
+        b00=aio.read(args.files[1])
+        b=aio.read(args.files[0])
+        
+        # exit()
     if not os.path.exists(args.output):
         os.mkdir(args.output)
 
-    b00=aio.read(args.files[1])
-    b=aio.read(args.files[0])
+    
     print(args.files[0],b.get_cell().lengths(), b.get_cell().angles())
     print(args.files[1],b00.get_cell().lengths(), b00.get_cell().angles())
     a=moredata()
