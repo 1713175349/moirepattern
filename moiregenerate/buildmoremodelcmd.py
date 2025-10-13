@@ -628,17 +628,25 @@ def main():
     a.epsilon=args.epsilon #超胞匹配的精度 
     a.lepsilon=args.lepsilon #超胞匹配的精度
     thetalist=np.linspace(args.range[0]*np.pi/180,args.range[1]*np.pi/180,int(args.range[2])) #搜索的角度范围
-    a.dtheta=thetalist[1]-thetalist[0] #搜索的角度步长
+    a.dtheta=max(0.05*np.pi/180,thetalist[1]-thetalist[0]) #搜索的角度步长
 
     kexing=[]
     outs=[]
     pltdata=[]
-    for theta in thetalist:   
+    import tqdm
+    unikey=set()
+    def getunikey(angle,mn):
+        return f"{angle:.3f}_{mn[0][0]}_{mn[0,1]}_{mn[1][0]}_{mn[1][1]}"
+    for theta in tqdm.tqdm(thetalist):   
         try :
             a.changetheta(theta)
             mn,area=a.getminmnplot()
             if mn.shape==(2,2):
                 res=a.relaxwithmn(mn)
+                key=getunikey(res.x,mn)
+                if key in unikey:
+                    continue
+                unikey.add(key)
                 outs.append((res.x,area,mn))
                 pltdata.append([res.x,area])
                 if res.success:

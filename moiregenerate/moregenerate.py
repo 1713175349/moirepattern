@@ -79,7 +79,7 @@ class moredata(object):
             if latticemis < self.lepsilon:
                 latticemis0=self.getmismactch(np.array([mns[0],mns[index[i]]]),self.theta-self.dtheta)
                 latticemis1=self.getmismactch(np.array([mns[0],mns[index[i]]]),self.theta+self.dtheta)
-                # print("mismatch: ",latticemis0-latticemis,latticemis1)
+                
                 if latticemis0>latticemis and latticemis1>latticemis:
                     newab.append(mns[index[i]])
                     matcharea=areas[index[i]]
@@ -166,6 +166,7 @@ class moredata(object):
                 latticemis0=self.getmismactch(np.array([mns[0],mns[index[i]]]),self.theta-self.dtheta)
                 latticemis1=self.getmismactch(np.array([mns[0],mns[index[i]]]),self.theta+self.dtheta)
                 # print("mismatch: ",latticemis0-latticemis,latticemis1)
+                # print("theta:",self.theta,"mismatch: ",latticemis0-latticemis,latticemis1-latticemis)
                 if latticemis0>latticemis and latticemis1>latticemis:
                     newab.append(mns[index[i]])
                     matcharea=areas[index[i]]
@@ -260,8 +261,9 @@ class moredata(object):
         U=np.linalg.inv(sA).dot(sB)
         MN=(U.T-np.eye(2))
         # print(sA-sB,MN)
-        # MN=(MN+MN.T)/2
+        MN=(MN+MN.T)/2
         # print("MN norm:",MN,np.linalg.norm(MN,ord=2))
+        return  np.linalg.norm(MN, ord='fro')
         return np.linalg.norm(MN,ord=2)
     
     def getinformation(self,mn,theta):
