@@ -508,7 +508,7 @@ def main():
     parser = argparse.ArgumentParser(description='generate a structure')
     parser.add_argument("files", type=str, default=None,nargs=2, help='file name')
     parser.add_argument('-o', '--output', type=str, default='tmpoutput', help='output dir')
-    parser.add_argument("-r","--range",type=float,default=[0,180,1000],nargs=3,help="theta range")
+    parser.add_argument("-r","--range",type=float,default=[0,180,1000],nargs=3,help="theta range: start end num")
     parser.add_argument("-e","--epsilon",type=float,default=0.04,help="epsilon 晶格矢量允许误差")
     parser.add_argument("-l","--lepsilon",type=float,default=0.04,help="lepsilon 晶格整体误差")
     parser.add_argument("--maxl",type=float,default=50,help="最大晶格长度")
