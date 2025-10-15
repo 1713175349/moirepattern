@@ -303,8 +303,8 @@ def build_moire_pattern(a:Atoms,b:Atoms,theta,newvec,layer_thickness,shift=[0,0]
     newcm=np.round(newcm)
     sb=build_nsupercell(b,[[newcm[0][0],newcm[0][1],0],[newcm[1][0],newcm[1][1],0],[0,0,1]])
     
-    if (sa.get_global_number_of_atoms()!=sb.get_global_number_of_atoms()):
-        print('Warning: the number of atoms in two supercells are not equal',sa.get_chemical_formula(),sb.get_chemical_formula())
+    # if (sa.get_global_number_of_atoms()!=sb.get_global_number_of_atoms()):
+    #     print('Warning: the number of atoms in two supercells are not equal',sa.get_chemical_formula(),sb.get_chemical_formula())
     sb.positions=np.dot(R3,sb.positions.T).T
     ncell2=np.dot(R3,sb.get_cell().array.T).T
     sb.set_cell(ncell2)
@@ -314,7 +314,7 @@ def build_moire_pattern(a:Atoms,b:Atoms,theta,newvec,layer_thickness,shift=[0,0]
     sazmax=np.max(sa.get_positions()[:,2])
     
     moiremodel.extend(sa)
-    print(moiremodel.constraints)
+    # print(moiremodel.constraints)
 
     
     if relax_shift:
@@ -502,100 +502,6 @@ def create_matched_structure(atoms1: Atoms, atoms2: Atoms,maxm:int=10, layer_thi
 
     return matched_structure
 
-
-
-def main_nep():
-
-    import argparse
-    parser = argparse.ArgumentParser(description='generate a structure')
-    parser.add_argument("files", type=str, default=None,nargs=2, help='file name')
-    parser.add_argument('-o', '--output', type=str, default='tmpoutput', help='output dir')
-    parser.add_argument("-r","--range",type=float,default=[0,180,1000],nargs=3,help="theta range")
-    parser.add_argument("-e","--epsilon",type=float,default=0.04,help="epsilon 晶格矢量允许误差")
-    parser.add_argument("-l","--lepsilon",type=float,default=0.04,help="lepsilon 晶格面积误差")
-    parser.add_argument("-m","--maxm",type=int,default=10,help="maxmium supercell size,搜索的时候建议依次增大，可以避免找不到小原胞")
-    parser.add_argument("--distance",type=float,default=3.04432,help="distance between two supercells")
-    parser.add_argument("--needshift",action='store_true',help="need shift")
-    args=parser.parse_args()
-    from pynep.calculate import NEP
-    clc=NEP("nep.txt")
-    if args.files is None or len(args.files)!=2:
-        print("please input two files")
-        from ase.build import mx2
-        b00=mx2(vacuum=15)
-        b00.pbc=True
-        b=b00.copy()
-    else:
-        b00=aio.read(args.files[1])
-        b=aio.read(args.files[0])
-        
-        # exit()
-    if not os.path.exists(args.output):
-        os.mkdir(args.output)
-
-    
-    print(args.files[0],b.get_cell().lengths(), b.get_cell().angles())
-    print(args.files[1],b00.get_cell().lengths(), b00.get_cell().angles())
-    a=moredata()
-
-    a.A=b.get_cell().array[:2,:2]
-    a.B0=b00.get_cell().array[:2,:2]
-    a.maxm=args.maxm #最大超胞大小
-    a.getallchoose() #获取所有可能的超胞
-    a.epsilon=args.epsilon #超胞匹配的精度 
-    a.lepsilon=args.lepsilon #超胞匹配的精度
-    thetalist=np.linspace(args.range[0]*np.pi/180,args.range[1]*np.pi/180,int(args.range[2])) #搜索的角度范围
-    a.dtheta=thetalist[1]-thetalist[0] #搜索的角度步长
-
-    kexing=[]
-    outs=[]
-    pltdata=[]
-    for theta in thetalist:   
-        try :
-            a.changetheta(theta)
-            mn,area=a.getminmnplot()
-            if mn.shape==(2,2):
-                res=a.relaxwithmn(mn)
-                outs.append((res.x,area,mn))
-                pltdata.append([res.x,area])
-                if res.success:
-                    print("success:",theta/np.pi*180,res.x/np.pi*180,mn)
-                    kexing.append((res.x,res.fun,mn))
-        except BaseException as e:
-            #print(e)
-            continue     
-    print(kexing)
-    kk=0
-    informations={}
-    for k in kexing:
-        print(kk,k[0]/np.pi*180,k[2])
-        kk+=1
-        try :
-            m=build_moire_pattern_nep(b,b00,k[0],k[2],args.distance,relax_shift=args.needshift,calc=clc)
-            filename="POSCAR-{k1:.10f}-{rrr:.3f}.vasp".format(k1=k[0]*180/np.pi,rrr=k[1]*100)
-            informations0=build_moire_patterninformation(b,b00,k[0],k[2],args.distance,relax_shift=args.needshift)
-            informations0['theta']=k[0]
-            informations0['epsilon']=k[1]
-            informations[filename]=informations0
-            
-            m.wrap()
-            m.write(os.path.join(args.output,filename),format="vasp",direct=True)
-        except BaseException as e:
-            print(e)
-            continue
-
-    import json
-
-    if os.path.exists(os.path.join(args.output,"informations.json")):
-        with open(os.path.join(args.output,"informations.json"),'r') as f:
-            informationsold=json.load(f)
-            informations1=informationsold.update(informations)
-            informations=informationsold
-    with open(os.path.join(args.output,"informations.json"),'w') as f:
-        json.dump(informations,f)
-    # aa=(build_nsupercell(a,np.array([[2,1,0],[0,1,0],[0,0,1]])))
-    # aa.write("POSCAR.vasp")
-
 def main():
 
     import argparse
@@ -604,7 +510,8 @@ def main():
     parser.add_argument('-o', '--output', type=str, default='tmpoutput', help='output dir')
     parser.add_argument("-r","--range",type=float,default=[0,180,1000],nargs=3,help="theta range")
     parser.add_argument("-e","--epsilon",type=float,default=0.04,help="epsilon 晶格矢量允许误差")
-    parser.add_argument("-l","--lepsilon",type=float,default=0.04,help="lepsilon 晶格面积误差")
+    parser.add_argument("-l","--lepsilon",type=float,default=0.04,help="lepsilon 晶格整体误差")
+    parser.add_argument("--maxl",type=float,default=50,help="最大晶格长度")
     parser.add_argument("-m","--maxm",type=int,default=10,help="maxmium supercell size,搜索的时候建议依次增大，可以避免找不到小原胞")
     parser.add_argument("--distance",type=float,default=3.04432,help="distance between two supercells")
     parser.add_argument("--needshift",action='store_true',help="need shift")
@@ -624,12 +531,13 @@ def main():
     a.A=b.get_cell().array[:2,:2]
     a.B0=b00.get_cell().array[:2,:2]
     a.maxm=args.maxm #最大超胞大小
+    a.max_lattice_length=args.maxl # 最大晶格长度
     a.getallchoose() #获取所有可能的超胞
     a.epsilon=args.epsilon #超胞匹配的精度 
     a.lepsilon=args.lepsilon #超胞匹配的精度
     thetalist=np.linspace(args.range[0]*np.pi/180,args.range[1]*np.pi/180,int(args.range[2])) #搜索的角度范围
-    a.dtheta=max(0.05*np.pi/180,thetalist[1]-thetalist[0]) #搜索的角度步长
-
+    a.dtheta=thetalist[1]-thetalist[0]#max(0.01*np.pi/180,thetalist[1]-thetalist[0]) #搜索的角度步长
+    print("args.range",args.range)
     kexing=[]
     outs=[]
     pltdata=[]
@@ -640,26 +548,26 @@ def main():
     for theta in tqdm.tqdm(thetalist):   
         try :
             a.changetheta(theta)
-            mn,area=a.getminmnplot()
+            mn,area=a.getminmnplot_v2()
             if mn.shape==(2,2):
                 res=a.relaxwithmn(mn)
-                key=getunikey(res.x,mn)
-                if key in unikey:
-                    continue
-                unikey.add(key)
+                # key=getunikey(res.x,mn)
+                # if key in unikey:
+                #     continue
+                # unikey.add(key)
                 outs.append((res.x,area,mn))
                 pltdata.append([res.x,area])
                 if res.success:
-                    print("success:",theta/np.pi*180,res.x/np.pi*180,mn)
+                    #print("success:",theta/np.pi*180,res.x/np.pi*180,mn)
                     kexing.append((res.x,res.fun,mn))
         except BaseException as e:
             #print(e)
             continue     
-    print(kexing)
+    print("Founding ",len(kexing))
     kk=0
     informations={}
     for k in kexing:
-        print(kk,k[0]/np.pi*180,k[2])
+        # print(kk,k[0]/np.pi*180,k[2])
         kk+=1
         try :
             m=build_moire_pattern(b,b00,k[0],k[2],args.distance,relax_shift=args.needshift)
