@@ -512,7 +512,7 @@ def main():
     parser.add_argument("-e","--epsilon",type=float,default=0.04,help="epsilon 晶格矢量允许误差")
     parser.add_argument("-l","--lepsilon",type=float,default=0.04,help="lepsilon 晶格整体误差")
     parser.add_argument("--maxl",type=float,default=50,help="最大晶格长度")
-    parser.add_argument("-m","--maxm",type=int,default=10,help="maxmium supercell size,搜索的时候建议依次增大，可以避免找不到小原胞")
+    parser.add_argument("-m","--maxm",type=int,default=50,help="maxmium supercell size,搜索的时候建议依次增大，可以避免找不到小原胞")
     parser.add_argument("--distance",type=float,default=3.04432,help="distance between two supercells")
     parser.add_argument("--needshift",action='store_true',help="need shift")
     args=parser.parse_args()
