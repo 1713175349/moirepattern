@@ -1,5 +1,0 @@
-#!/bin/env python
-
-from moiregenerate.buildmoremodelcmd import main_nep
-
-main_nep()

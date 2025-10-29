@@ -1,599 +1,525 @@
-#用于构建摩尔纹结构，对输入文件要求z轴为真空层方向，需要给定层间距
+"""
+Module for building moiré structures
+Input files should have z-axis as vacuum direction, and interlayer distance needs to be specified
+"""
 
-import ase.io as aio
-from ase.build import supercells,sort
-from ase.visualize import view
-from ase import atoms,Atoms
-import numpy as np
+import json
 import os
-import argparse
+from typing import List, Tuple, Dict, Any, Optional
+
+import numpy as np
+import ase.io as aio
+from ase import Atoms
+from ase.build import make_supercell, sort
+from ase.constraints import FixAtoms
 from ase.geometry import get_distances
-from .moregenerate import *
+from scipy import optimize
 
-def get_thickness(a:Atoms):
-    '''
-    获取原子层间距
-    '''
-    z = a.get_positions()[:,2]
-    zmax=np.max(z)
-    zmin=np.min(z)
-    return zmax-zmin
-
-def get_rotation_matrix(theta):
-    '''
-    获取3D旋转矩阵
-    '''
-    c, s = np.cos(theta), np.sin(theta)
-    R = np.array(((c, -s, 0), (s, c, 0), (0, 0, 1)))
-    return R
-
-def get_rotation_matrix2d(theta):
-    '''
-    获取2D旋转矩阵
-    '''
-    c, s = np.cos(theta), np.sin(theta)
-    R = np.array(((c, -s), (s, c)))
-    return R
+from .moregenerate import MoireData
 
 
-def lattice_points_in_supercell(supercell_matrix):
+def get_layer_thickness(structure: Atoms) -> float:
     """
-    Returns the list of points on the original lattice contained in the
-    supercell in fractional coordinates (with the supercell basis).
-    e.g. [[2,0,0],[0,1,0],[0,0,1]] returns [[0,0,0],[0.5,0,0]]
+    Calculate the thickness of an atomic layer
 
     Args:
-        supercell_matrix: 3x3 matrix describing the supercell
+        structure: Atomic structure object
 
     Returns:
-        numpy array of the fractional coordinates
+        Layer thickness (Angstrom)
     """
-    diagonals = np.array(
-        [
-            [0, 0, 0],
-            [0, 0, 1],
-            [0, 1, 0],
-            [0, 1, 1],
-            [1, 0, 0],
-            [1, 0, 1],
-            [1, 1, 0],
-            [1, 1, 1],
-        ]
+    z_positions = structure.get_positions()[:, 2]
+    return np.max(z_positions) - np.min(z_positions)
+
+
+def get_rotation_matrix_3d(theta: float) -> np.ndarray:
+    """
+    Get 3D rotation matrix (around z-axis)
+
+    Args:
+        theta: Rotation angle (radians)
+
+    Returns:
+        3x3 rotation matrix
+    """
+    cos_theta, sin_theta = np.cos(theta), np.sin(theta)
+    return np.array([
+        [cos_theta, -sin_theta, 0],
+        [sin_theta, cos_theta, 0],
+        [0, 0, 1]
+    ])
+
+
+def get_rotation_matrix_2d(theta: float) -> np.ndarray:
+    """
+    Get 2D rotation matrix
+
+    Args:
+        theta: Rotation angle (radians)
+
+    Returns:
+        2x2 rotation matrix
+    """
+    cos_theta, sin_theta = np.cos(theta), np.sin(theta)
+    return np.array([
+        [cos_theta, -sin_theta],
+        [sin_theta, cos_theta]
+    ])
+
+
+def build_supercell(structure: Atoms, transformation_matrix: np.ndarray) -> Atoms:
+    """
+    Build supercell structure through given matrix
+
+    Args:
+        structure: Original atomic structure
+        transformation_matrix: 3x3 transformation matrix
+
+    Returns:
+        Supercell structure
+    """
+    structure = structure.copy()
+
+    # Save fixed atom constraints
+    fixed_indices = np.zeros(len(structure), dtype=np.int32)
+    for constraint in structure.constraints:
+        if isinstance(constraint, FixAtoms):
+            fixed_indices[constraint.get_indices()] = 1
+    structure.arrays["fix_atoms"] = fixed_indices
+
+    # Build supercell
+    supercell = make_supercell(structure, transformation_matrix)
+
+    return supercell
+
+
+def build_moire_pattern(
+    layer_a: Atoms,
+    layer_b: Atoms,
+    rotation_angle: float,
+    supercell_matrix_a: np.ndarray,
+    interlayer_distance: float,
+    vacuum_thickness: float = 20.0
+) -> Atoms:
+    """
+    Build moiré structure
+
+    Args:
+        layer_a: Lower layer atomic structure
+        layer_b: Upper layer atomic structure
+        rotation_angle: Rotation angle (radians)
+        supercell_matrix: 2x2 supercell matrix
+        interlayer_distance: Interlayer distance
+        vacuum_thickness: Vacuum layer thickness
+
+    Returns:
+        Moiré structure
+    """
+    # Ensure supercell matrix is right-handed coordinate system
+    if np.linalg.det(supercell_matrix_a) < 0:
+        supercell_matrix_a = np.array([supercell_matrix_a[1], supercell_matrix_a[0]])
+
+    cell_a = layer_a.get_cell().array
+    cell_b = layer_b.get_cell().array
+
+    # Extract 2D lattice vectors
+    lattice_a = cell_a[:2, :2]
+    lattice_b = cell_b[:2, :2]
+
+    # Apply rotation
+    rotation_2d = get_rotation_matrix_2d(rotation_angle)
+    rotation_3d = get_rotation_matrix_3d(rotation_angle)
+    lattice_b = np.dot(rotation_2d, lattice_b.T).T
+
+    # Build supercell
+    supercell_matrix_b = np.round(np.dot(supercell_matrix_a, np.dot(lattice_a, np.linalg.inv(lattice_b))))
+
+    # Build supercell
+    supercell_a = build_supercell(
+        layer_a,
+        [[supercell_matrix_a[0, 0], supercell_matrix_a[0, 1], 0],
+         [supercell_matrix_a[1, 0], supercell_matrix_a[1, 1], 0],
+         [0, 0, 1]]
     )
-    d_points = np.dot(diagonals, supercell_matrix)
 
-    mins = np.min(d_points, axis=0)
-    maxes = np.max(d_points, axis=0) + 1
+    supercell_b = build_supercell(
+        layer_b,
+        [[supercell_matrix_b[0, 0], supercell_matrix_b[0, 1], 0],
+         [supercell_matrix_b[1, 0], supercell_matrix_b[1, 1], 0],
+         [0, 0, 1]]
+    )
 
-    ar = np.arange(mins[0], maxes[0])[:, None] * np.array([1, 0, 0])[None, :]
-    br = np.arange(mins[1], maxes[1])[:, None] * np.array([0, 1, 0])[None, :]
-    cr = np.arange(mins[2], maxes[2])[:, None] * np.array([0, 0, 1])[None, :]
+    # Rotate upper layer structure
+    supercell_b.positions = np.dot(rotation_3d, supercell_b.positions.T).T
+    supercell_b.set_cell(np.dot(rotation_3d, supercell_b.get_cell().array.T).T)
 
-    all_points = ar[:, None, None] + br[None, :, None] + cr[None, None, :]
-    all_points = all_points.reshape((-1, 3))
+    # Create moiré model
+    moire_structure = Atoms(
+        cell=(supercell_a.get_cell() + supercell_b.get_cell()) / 2,
+        pbc=[True, True, False]
+    )
 
-    frac_points = np.dot(all_points, np.linalg.inv(supercell_matrix))
+    average_lattice = moire_structure.get_cell()
 
-    tvects = frac_points[np.all(frac_points < 1 - 1e-10, axis=1) & np.all(frac_points >= -1e-10, axis=1)]
-    assert len(tvects) == round(abs(np.linalg.det(supercell_matrix)))
-    return tvects
+    average_lattice[2] = supercell_a.cell[2]
+    supercell_a.set_cell(average_lattice, scale_atoms=True)
+    average_lattice[2] = supercell_b.cell[2]
+    supercell_b.set_cell(average_lattice, scale_atoms=True)
 
-def build_nsupercell(a:Atoms,P):
-    '''
-    通过给定的矩阵P构建表面结构,可以构建一些根号超胞
-    '''
-    from ase.build import make_supercell
-    from ase.constraints import FixAtoms
-    a=a.copy()
-    fixed_index=np.zeros(len(a),dtype=np.int32)
-    for i in a.constraints:
-        if isinstance(i,FixAtoms):
-            fixed_index[i.get_indices()]=1
-    a.arrays["fix_atoms"]=fixed_index
-    out=make_supercell(a,P)
-    # out.set_constraint(FixAtoms(np.where(out.arrays["fix_atoms"]==1)[0]))
-    # print(out.constraints)
-    return out
-    
-    a=a.copy()
-    P=np.array(P)
-    a.wrap()
-    cell = a.get_cell().array
-    ncell=np.dot(P,cell)
-    eles=a.get_atomic_numbers()
-    pos=a.get_positions()
-    allvec=lattice_points_in_supercell(P)
-    allvec0=allvec.dot(ncell)
-    npos=np.zeros((len(allvec)*len(pos),3))
-    neles=np.zeros(len(allvec)*len(pos),dtype=np.int32)
-    # print(allvec[1])
-    for i in range(len(allvec)):
-        for j in range(len(pos)):
-            npos[i*len(pos)+j]=allvec0[i]+pos[j]
-            neles[i*len(pos)+j]=eles[j]
-    a_new=Atoms(cell=ncell,pbc=True,positions=npos,numbers=neles)
-    a_new.wrap()
-    return a_new
+    # Adjust lower layer structure position
+    min_z_a = np.min(supercell_a.get_positions()[:, 2])
+    supercell_a.positions[:, 2] += (1 - min_z_a)
+    max_z_a = np.max(supercell_a.get_positions()[:, 2])
 
-def build_nsupercel_(a:Atoms,P):
-    '''
-    通过给定的矩阵P构建表面结构,可以构建一些根号超胞
-    '''
-    a=a.copy()
-    P=np.array(P)
-    a.wrap()
-    cell = a.get_cell().array
-    ncell=np.dot(P,cell)
-    scaled = a.get_scaled_positions()
-    eles = a.get_atomic_numbers()
-    vecrange=np.sum(np.abs(P),axis=0)+4
-    vecrange=[int(i) for i in vecrange]
-    # vecrange[2]=1
-    #a_new=Atoms(cell=ncell,pbc=True)
+    # Add lower layer to moiré structure
+    moire_structure.extend(supercell_a)
 
-    Ptr=np.linalg.inv(P)
-    npos=[]
-    neles=[]
-    #print(np.dot(ncell[0],ncell[1]))
-    for i in range(-vecrange[0],vecrange[0]+1):
-        for j in range(-vecrange[1],vecrange[1]+1):
-            for k in range(-vecrange[2],vecrange[2]+1):
-                scaled_new = scaled + (np.array([i,j,k]))
-                scaled_new = np.dot(scaled_new, Ptr)
-                for pi in range(len(eles)):
-                    nowpos=scaled_new[pi]
-                    nowposc=nowpos.dot(ncell)
-                    if np.all(np.logical_and(nowpos<=1.5,nowpos>=-0.7)):
-                        # if not np.all(np.logical_and(nowpos<1,nowpos>0)):
-                        #     print(nowpos)
-                        if len(npos)>0:# and (np.min(np.abs(nowpos))<0.1 or np.min(np.abs(nowpos-1))<0.1):
-                            _,D_l = get_distances(npos,[nowposc],cell=ncell,pbc=[True,True,True])
-                            if np.min(D_l) < 0.5:
-                                #print(nowpos)
-                                continue
-                        npos.append(nowposc)
-                        neles.append(eles[pi])
-                # wheres =(np.array([0,1,2],dtype=np.int32),) 
-                # #wheres=np.where(np.logical_and(np.min(scaled_new,axis=1)>=-0.1,np.max(scaled_new,axis=1)<=1))
-                
-                # if a_new.get_number_of_atoms()==0:
-                #         newwheres=wheres
-                # else:
-                #     newwheres=[]
-                #     for i in wheres[0]:
-                #         D,D_l=get_distances(a_new.positions,[ccell.cartesian_positions(scaled_new[i])],cell=ccell,pbc=a_new.get_pbc())
-                #         if np.min(D_l)<0.0001:
-                #             # print('Warning: the atoms are too close')
-                #             # print(i)
-                #             pass
-                #         else:
-                #             newwheres.append(i)
-                #     newwheres=(np.array(newwheres,dtype=np.int32),)
-                #     wheres=newwheres
+    # Process upper layer structure
+    min_z_b = np.min(supercell_b.get_positions()[:, 2])
+    # No shift, directly add upper layer
+    z_offset = -min_z_b + max_z_a + interlayer_distance
+    supercell_b.positions[:, 2] += z_offset
+    moire_structure.extend(supercell_b)
 
-                # scaled_new=scaled_new[wheres]
-                # eles_new = eles[wheres]
-                # a_new.extend(Atoms(cell=ncell, scaled_positions=scaled_new, numbers=eles_new, pbc=True))
-    a_new=Atoms(cell=ncell,pbc=True,positions=npos,numbers=neles)
-    # aa=a.get_atomic_numbers()
-    # bb=a_new.get_atomic_numbers()
-    # print(len(aa[aa==42])/len(aa[aa==16]),len(bb[bb==42])/len(bb[bb==16]),P)
-    # cc=a_new.get_all_distances(mic=True)
-    # cc+=np.eye(cc.shape[0])
-    # print(np.min(cc))
-    #print(a_new.get_number_of_atoms())
-    a_new.wrap()
-    # a_new.get_atomic_numbers()
-    eles=a.get_atomic_numbers()
-    statisunit=np.zeros((300,),dtype=np.int32)
-    for i in range(a_new.get_number_of_atoms()):
-        statisunit[a_new.get_atomic_numbers()[i]]+=1
-    eles_new=a_new.get_atomic_numbers()
-    statisnew=np.zeros((300,),dtype=np.int32)
-    for i in range(a_new.get_number_of_atoms()):
-        statisnew[eles_new[i]]+=1
-    # compare there weight
-    statisnew=statisnew[statisnew>0]
-    statisunit=statisunit[statisunit>0]
-    pro=statisnew/statisunit
-    for i in range(len(pro)):
-        if not np.isclose(pro[i],pro[0]):
-            print("##############################################################")
-            print(pro[i],pro[0])
-            print(i,0)
-            print("超胞生成错误")
-            os._exit(0)
-    return a_new
-    
+    # Sort atoms and apply constraints
+    moire_structure = sort(moire_structure)
 
-from ase.calculators import lammpsrun
-from scipy import optimize
-#set calculator
-calc=None
-# calc=lammpsrun.LAMMPS(command="/home/zln/lammps-stable_29Sep2021_update2/build/lmp",
-#     parameters={'units':'metal','pair_style':'lj/cut 11','pair_coeff':['* * 10 3.18 12']},
-# )
+    fixed_atoms = np.where(moire_structure.arrays["fix_atoms"] == 1)[0]
+    if len(fixed_atoms) > 0:
+        moire_structure.set_constraint(FixAtoms(fixed_atoms))
 
-def build_moire_patterninformation(a:Atoms,b:Atoms,theta,newvec,layer_thickness,shift=[0,0],relax_shift=True,innewB=False,vacuum_thickness=20):
-    
-    if np.linalg.det(newvec)<0:
-        newvec=np.array([newvec[1],newvec[0]])
+    moire_structure.center(vacuum=vacuum_thickness / 2, axis=2)
+    moire_structure.pbc = True
 
-    shift=np.array(shift)
-    cell1=a.get_cell().array
-    cell2=b.get_cell().array
-    A=cell1[:2,:2]
-    B=cell2[:2,:2]
-    R=get_rotation_matrix2d(theta)
-    R3=get_rotation_matrix(theta)
-    B=np.dot(R,B.T).T
+    return moire_structure
 
 
-    nA=np.dot(newvec,A)
-    newcm=np.dot(newvec,np.dot(A,np.linalg.inv(B)))
-    nB=np.dot(np.round(newcm),B)
-    ## 为了减少失配度度，得到一个新的单位cell
-    nD = (nA+nB)/2
-    layer_thickness1 = np.max(a.positions[:,2])- np.min(a.positions[:,2])
-    layer_thickness2 = np.max(b.positions[:,2])- np.min(b.positions[:,2])
+def get_moire_pattern_info(
+    layer_a: Atoms,
+    layer_b: Atoms,
+    rotation_angle: float,
+    supercell_matrix: np.ndarray,
+    interlayer_distance: float,
+    vacuum_thickness: float = 20.0
+) -> Dict[str, Any]:
+    """
+    Get moiré structure information
+
+    Args:
+        layer_a: Lower layer atomic structure
+        layer_b: Upper layer atomic structure
+        rotation_angle: Rotation angle (radians)
+        supercell_matrix: 2x2 supercell matrix
+        interlayer_distance: Interlayer distance
+        vacuum_thickness: Vacuum layer thickness
+
+    Returns:
+        Dictionary containing structure information
+    """
+    if np.linalg.det(supercell_matrix) < 0:
+        supercell_matrix = np.array([supercell_matrix[1], supercell_matrix[0]])
+
+    cell_a = layer_a.get_cell().array
+    cell_b = layer_b.get_cell().array
+    lattice_a = cell_a[:2, :2]
+    lattice_b = cell_b[:2, :2]
+
+    rotation_2d = get_rotation_matrix_2d(rotation_angle)
+    lattice_b = np.dot(rotation_2d, lattice_b.T).T
+
+    supercell_lattice_a = np.dot(supercell_matrix, lattice_a)
+    supercell_matrix_b = np.dot(supercell_matrix, np.dot(lattice_a, np.linalg.inv(lattice_b)))
+    supercell_lattice_b = np.dot(np.round(supercell_matrix_b), lattice_b)
+    average_lattice = (supercell_lattice_a + supercell_lattice_b) / 2
+
+    thickness_a = get_layer_thickness(layer_a)
+    thickness_b = get_layer_thickness(layer_b)
 
     return {
-        "discraption":"""
-        Amn:表示下层超晶格与原胞的转换矩阵
-        Bmn:表示上层超晶格与原胞的转换矩阵
-        sA:表示下层的晶格矢量,每行一个
-        sB:表示上层的晶格矢量,每行一个
-        layer_thickness:表示下层和上层的原胞的厚度
-        newlattice:表示下层和上层的超晶格
-        split_height:表示下层和上层的原胞的分割高度
+        "description": """
+        Moiré structure information:
+        Amn: Transformation matrix from lower supercell to primitive cell
+        Bmn: Transformation matrix from upper supercell to primitive cell
+        sA: Lower layer supercell lattice vectors
+        sB: Upper layer supercell lattice vectors
+        layer_thickness: Layer thickness
+        newlattice: Average supercell lattice
+        split_height: Split height
         """,
-        'Amn':nA.tolist(),
-        'Bmn':newcm.tolist(),
-        'sA':nA.tolist(),
-        'sB':nB.tolist(),
-        'A':A.tolist(),
-        'B':B.tolist(),
-        'R':R.tolist(),
-        'split_height':1+layer_thickness1+layer_thickness1/2,
-        'layer_thickness':layer_thickness,
-        'layer_thickness1':layer_thickness1,
-        'layer_thickness2':layer_thickness2,
-        'newlattice':nD.tolist(),
-        
+        'Amn': supercell_lattice_a.tolist(),
+        'Bmn': supercell_matrix_b.tolist(),
+        'sA': supercell_lattice_a.tolist(),
+        'sB': supercell_lattice_b.tolist(),
+        'A': lattice_a.tolist(),
+        'B': lattice_b.tolist(),
+        'R': rotation_2d.tolist(),
+        'split_height': 1 + thickness_a + thickness_a / 2,
+        'layer_thickness': interlayer_distance,
+        'layer_thickness1': thickness_a,
+        'layer_thickness2': thickness_b,
+        'newlattice': average_lattice.tolist(),
     }
 
-def build_moire_pattern(a:Atoms,b:Atoms,theta,newvec,layer_thickness,shift=[0,0],relax_shift=True,innewB=False,vacuum_thickness=20):
-    
-    if np.linalg.det(newvec)<0:
-        newvec=np.array([newvec[1],newvec[0]])
 
-    shift=np.array(shift)
-    cell1=a.get_cell().array
-    cell2=b.get_cell().array
-    A=cell1[:2,:2]
-    B=cell2[:2,:2]
-    R=get_rotation_matrix2d(theta)
-    R3=get_rotation_matrix(theta)
-    B=np.dot(R,B.T).T
-
-
-    nA=np.dot(newvec,A)
-    newcm=np.dot(newvec,np.dot(A,np.linalg.inv(B)))
-    nB=np.dot(np.round(newcm),B)
-
-    ## 为了减少失配度度，得到一个新的单位cell
-    nD = (nA+nB)/2
-    
-    transvec1 = np.dot(np.linalg.inv(nA),nD)
-    transvec2 = np.dot(np.linalg.inv(nB),nD)
-
-    transvec1 = np.array([[transvec1[0,0],transvec1[0,1],0],[transvec1[1,0],transvec1[1,1],0],[0,0,1]])
-    transvec2 = np.array([[transvec2[0,0],transvec2[0,1],0],[transvec2[1,0],transvec2[1,1],0],[0,0,1]])
-
-    # tranvec=np.dot(np.linalg.inv(nB),nA) # 将转动后B胞中的坐标变到A胞中（用于处理晶格失配）
-    # tranvec=np.array([[tranvec[0,0],tranvec[0,1],0],[tranvec[1,0],tranvec[1,1],0],[0,0,1]])
-
-    layer_thickness1 = np.max(a.positions[:,2])- np.min(a.positions[:,2])
-    layer_thickness2 = np.max(b.positions[:,2])- np.min(b.positions[:,2])
-    newzlength = layer_thickness1+layer_thickness2+layer_thickness+vacuum_thickness #20位
-
-    moiremodel=Atoms(cell=[[nD[0][0],nD[0][1],0],[nD[1][0],nD[1][1],0],[0,0,newzlength]],pbc=True)
-
-    sa=build_nsupercell(a,[[newvec[0][0],newvec[0][1],0],[newvec[1][0],newvec[1][1],0],[0,0,1]])
-    newcm=np.round(newcm)
-    sb=build_nsupercell(b,[[newcm[0][0],newcm[0][1],0],[newcm[1][0],newcm[1][1],0],[0,0,1]])
-    
-    # if (sa.get_global_number_of_atoms()!=sb.get_global_number_of_atoms()):
-    #     print('Warning: the number of atoms in two supercells are not equal',sa.get_chemical_formula(),sb.get_chemical_formula())
-    sb.positions=np.dot(R3,sb.positions.T).T
-    ncell2=np.dot(R3,sb.get_cell().array.T).T
-    sb.set_cell(ncell2)
-    sazmin=np.min(sa.get_positions()[:,2])
-    sa.positions[:,2]+=(1-sazmin) # 将sa移动到高1埃的位置
-    sa.positions=np.dot(sa.positions,transvec1) # 将转动后A胞中的坐标变到moire胞中
-    sazmax=np.max(sa.get_positions()[:,2])
-    
-    moiremodel.extend(sa)
-    # print(moiremodel.constraints)
-
-    
-    if relax_shift:
-
-        """优化层间相对位置，采用简单的lj势能"""
-        def shift_energy(shift1):
-            #print(shift1)
-            sb1=sb.copy()
-            moiremodeltmp=moiremodel.copy()
-            shift1=np.dot(shift1,nB)
-            sb1.positions=np.dot(sb1.positions,transvec2)
-            sb1zmin=np.min(sb1.get_positions()[:,2])
-            shift1=np.array([shift1[0],shift1[1],-sb1zmin+sazmax+layer_thickness])
-            sb1.positions+=np.broadcast_to(shift1,sb1.positions.shape)
-            moiremodeltmp.extend(sb1)
-            moiremodeltmp.wrap()
-            moiremodeltmp=supercells.make_supercell(moiremodeltmp,np.array([[3,0,0],[0,3,0],[0,0,1]])) #扩胞，防止错误
-            moiremodeltmp=sort(moiremodeltmp)
-            moiremodeltmp.set_calculator(calc)
-            return moiremodeltmp.get_potential_energy()
-
-        rs=optimize.minimize(shift_energy,np.array([0.2,0.3]),bounds=[(0,1),(0,1)],method='Nelder-Mead')
-        print(rs.x,rs)
-        shift=rs.x
-    if innewB or relax_shift:
-        shift=np.dot(shift,nB)
-    else:
-        shift=np.dot(shift,B)
-    sb.positions=np.dot(sb.positions,transvec2)
-    sbzmin=np.min(sb.get_positions()[:,2])
-    shift=np.array([shift[0],shift[1],-sbzmin+sazmax+layer_thickness])
-    sb.positions+=np.broadcast_to(shift,sb.positions.shape)
-    moiremodel.extend(sb)
-
-
-    moiremodel=sort(moiremodel)
-    from ase.constraints import FixAtoms
-    moiremodel.set_constraint(FixAtoms(np.where(moiremodel.arrays["fix_atoms"]==1)[0]))
-    # print("moire",moiremodel.constraints)
-    #print(moiremodel.get_chemical_symbols())
-    return moiremodel
-
-
-def build_moire_pattern_nep(a:Atoms,b:Atoms,theta,newvec,layer_thickness,shift=[0,0],relax_shift=True,innewB=False,vacuum_thickness=20,calc=None):
-    
-    if np.linalg.det(newvec)<0:
-        newvec=np.array([newvec[1],newvec[0]])
-
-    shift=np.array(shift)
-    cell1=a.get_cell().array
-    cell2=b.get_cell().array
-    A=cell1[:2,:2]
-    B=cell2[:2,:2]
-    R=get_rotation_matrix2d(theta)
-    R3=get_rotation_matrix(theta)
-    B=np.dot(R,B.T).T
-
-
-    nA=np.dot(newvec,A)
-    newcm=np.dot(newvec,np.dot(A,np.linalg.inv(B)))
-    nB=np.dot(np.round(newcm),B)
-
-    ## 为了减少失配度度，得到一个新的单位cell
-    nD = (nA+nB)/2
-    
-    transvec1 = np.dot(np.linalg.inv(nA),nD)
-    transvec2 = np.dot(np.linalg.inv(nB),nD)
-
-    transvec1 = np.array([[transvec1[0,0],transvec1[0,1],0],[transvec1[1,0],transvec1[1,1],0],[0,0,1]])
-    transvec2 = np.array([[transvec2[0,0],transvec2[0,1],0],[transvec2[1,0],transvec2[1,1],0],[0,0,1]])
-
-    # tranvec=np.dot(np.linalg.inv(nB),nA) # 将转动后B胞中的坐标变到A胞中（用于处理晶格失配）
-    # tranvec=np.array([[tranvec[0,0],tranvec[0,1],0],[tranvec[1,0],tranvec[1,1],0],[0,0,1]])
-
-    layer_thickness1 = np.max(a.positions[:,2])- np.min(a.positions[:,2])
-    layer_thickness2 = np.max(b.positions[:,2])- np.min(b.positions[:,2])
-    newzlength = layer_thickness1+layer_thickness2+layer_thickness+vacuum_thickness #20位
-
-    moiremodel=Atoms(cell=[[nD[0][0],nD[0][1],0],[nD[1][0],nD[1][1],0],[0,0,newzlength]],pbc=True)
-
-    sa=build_nsupercell(a,[[newvec[0][0],newvec[0][1],0],[newvec[1][0],newvec[1][1],0],[0,0,1]])
-    newcm=np.round(newcm)
-    sb=build_nsupercell(b,[[newcm[0][0],newcm[0][1],0],[newcm[1][0],newcm[1][1],0],[0,0,1]])
-    
-    if (sa.get_global_number_of_atoms()!=sb.get_global_number_of_atoms()):
-        print('Warning: the number of atoms in two supercells are not equal',sa.get_chemical_formula(),sb.get_chemical_formula())
-    sb.positions=np.dot(R3,sb.positions.T).T
-    ncell2=np.dot(R3,sb.get_cell().array.T).T
-    sb.set_cell(ncell2)
-    sazmin=np.min(sa.get_positions()[:,2])
-    sa.positions[:,2]+=(1-sazmin) # 将sa移动到高1埃的位置
-    sa.positions=np.dot(sa.positions,transvec1) # 将转动后A胞中的坐标变到moire胞中
-    sazmax=np.max(sa.get_positions()[:,2])
-    
-    moiremodel.extend(sa)
-
-    
-    if relax_shift:
-
-        """优化层间相对位置，采用简单的lj势能"""
-        def shift_energy(shift1):
-            #print(shift1)
-            sb1=sb.copy()
-            moiremodeltmp=moiremodel.copy()
-            shift1=np.dot(shift1,nB)
-            sb1.positions=np.dot(sb1.positions,transvec2)
-            sb1zmin=np.min(sb1.get_positions()[:,2])
-            shift1=np.array([shift1[0],shift1[1],-sb1zmin+sazmax+layer_thickness])
-            sb1.positions+=np.broadcast_to(shift1,sb1.positions.shape)
-            moiremodeltmp.extend(sb1)
-            moiremodeltmp.wrap()
-            moiremodeltmp=supercells.make_supercell(moiremodeltmp,np.array([[3,0,0],[0,3,0],[0,0,1]])) #扩胞，防止错误
-            moiremodeltmp=sort(moiremodeltmp)
-            moiremodeltmp.set_calculator(calc)
-            return moiremodeltmp.get_potential_energy()
-
-        rs=optimize.minimize(shift_energy,np.array([0.2,0.3]),bounds=[(0,1),(0,1)],method='Nelder-Mead')
-        print(rs.x,rs)
-        shift=rs.x
-    if innewB or relax_shift:
-        shift=np.dot(shift,nB)
-    else:
-        shift=np.dot(shift,B)
-    sb.positions=np.dot(sb.positions,transvec2)
-    sbzmin=np.min(sb.get_positions()[:,2])
-    shift=np.array([shift[0],shift[1],-sbzmin+sazmax+layer_thickness])
-    sb.positions+=np.broadcast_to(shift,sb.positions.shape)
-    moiremodel.extend(sb)
-
-
-    moiremodel=sort(moiremodel)
-    
-    #print(moiremodel.get_chemical_symbols())
-    return moiremodel
-
-def create_matched_structure(atoms1: Atoms, atoms2: Atoms,maxm:int=10, layer_thickness=2.5, angle: float=0., mismatch: float=0.04, vacuum: float=20) -> Atoms:
+def create_matched_structure(
+    atoms1: Atoms,
+    atoms2: Atoms,
+    maxm: int = 10,
+    layer_thickness: float = 2.5,
+    angle: float = 0.0,
+    mismatch: float = 0.04,
+    vacuum: float = 20.0
+) -> Atoms:
     """
-    创建两个原子结构的匹配界面结构。
+    Create matched interface structure for two atomic structures
 
-    参数:
-    atoms1 (Atoms): 第一个原子结构
-    atoms2 (Atoms): 第二个原子结构
-    angle (float): 旋转角度（度）
-    mismatch (float): 允许的晶格失配度
-    vacuum (float): 真空层厚度（埃）
+    Args:
+        atoms1: First atomic structure (lower layer)
+        atoms2: Second atomic structure (upper layer)
+        maxm: Maximum supercell size
+        layer_thickness: Interlayer distance
+        angle: Rotation angle (degrees)
+        mismatch: Allowed lattice mismatch
+        vacuum: Vacuum layer thickness (Angstrom)
 
-    返回:
-    Atoms: 匹配的界面结构
+    Returns:
+        Matched interface structure
     """
-    # 将角度转换为弧度
     theta = angle * np.pi / 180
 
-    # 创建 moredata 对象并设置参数
-    a = moredata()
-    a.A = atoms1.get_cell().array[:2, :2]
-    a.B0 = atoms2.get_cell().array[:2, :2]
-    a.maxm = maxm  # 最大超胞大小
-    a.epsilon = mismatch  # 晶格矢量允许误差
-    a.lepsilon = mismatch  # 晶格面积误差
-    a.maxLrate=10
-    # 获取所有可能的超胞
-    a.getallchoose()
+    # Create MoireData object and set parameters
+    moire_data = MoireData(
+        lattice_A=atoms1.get_cell().array[:2, :2],
+        lattice_B0=atoms2.get_cell().array[:2, :2],
+        maxm=maxm,
+        epsilon=mismatch,
+        lepsilon=mismatch,
+        maxLrate=10
+    )
+    moire_data.get_all_candidates()
 
-    # 尝试找到匹配的结构
-    a.changetheta(theta)
-    mn, area = a.getminmnplot()
-    
-    if mn.shape != (2, 2):
-        raise ValueError("无法找到匹配的结构")
+    # Find matching structure
+    moire_data.set_rotation_angle(theta)
+    mn_A, area, mn_B = moire_data.find_optimal_supercell()
 
-    # res = a.relaxwithmn(mn)
-    # if not res.success:
-    #     raise ValueError("无法找到匹配的结构")
+    if mn_A.shape != (2, 2):
+        raise ValueError("Cannot find matching structure")
 
-    # # 计算层间距离
-    # layer_thickness1 = np.max(atoms1.positions[:, 2]) - np.min(atoms1.positions[:, 2])
-    # layer_thickness2 = np.max(atoms2.positions[:, 2]) - np.min(atoms2.positions[:, 2])
-    # interlayer_distance = (layer_thickness1 + layer_thickness2) / 2
-
-    # 创建匹配的结构
+    # Build matched structure
     matched_structure = build_moire_pattern(
-        atoms1, atoms2, angle, mn, layer_thickness, 
-        relax_shift=False, vacuum_thickness=vacuum
+        atoms1, atoms2, angle, mn_A, layer_thickness,
+        vacuum_thickness=vacuum
     )
 
     return matched_structure
 
+
 def main():
-
+    """Main function for command line invocation"""
     import argparse
-    parser = argparse.ArgumentParser(description='generate a structure')
-    parser.add_argument("files", type=str, default=None,nargs=2, help='file name')
-    parser.add_argument('-o', '--output', type=str, default='tmpoutput', help='output dir')
-    parser.add_argument("-r","--range",type=float,default=[0,180,1000],nargs=3,help="theta range: start end num")
-    parser.add_argument("-e","--epsilon",type=float,default=0.04,help="epsilon 晶格矢量允许误差")
-    parser.add_argument("-l","--lepsilon",type=float,default=0.04,help="lepsilon 晶格整体误差")
-    parser.add_argument("--maxl",type=float,default=50,help="最大晶格长度")
-    parser.add_argument("-m","--maxm",type=int,default=50,help="maxmium supercell size,搜索的时候建议依次增大，可以避免找不到小原胞")
-    parser.add_argument("--distance",type=float,default=3.04432,help="distance between two supercells")
-    parser.add_argument("--needshift",action='store_true',help="need shift")
-    args=parser.parse_args()
-    if args.files is None or len(args.files)!=2:
-        print("please input two files")
-        exit()
-    if not os.path.exists(args.output):
-        os.mkdir(args.output)
-
-    b00=aio.read(args.files[1])
-    b=aio.read(args.files[0])
-    print(args.files[0],b.get_cell().lengths(), b.get_cell().angles())
-    print(args.files[1],b00.get_cell().lengths(), b00.get_cell().angles())
-    a=moredata()
-
-    a.A=b.get_cell().array[:2,:2]
-    a.B0=b00.get_cell().array[:2,:2]
-    a.maxm=args.maxm #最大超胞大小
-    a.max_lattice_length=args.maxl # 最大晶格长度
-    a.getallchoose() #获取所有可能的超胞
-    a.epsilon=args.epsilon #超胞匹配的精度 
-    a.lepsilon=args.lepsilon #超胞匹配的精度
-    thetalist=np.linspace(args.range[0]*np.pi/180,args.range[1]*np.pi/180,int(args.range[2])) #搜索的角度范围
-    a.dtheta=thetalist[1]-thetalist[0]#max(0.01*np.pi/180,thetalist[1]-thetalist[0]) #搜索的角度步长
-    print("args.range",args.range)
-    kexing=[]
-    outs=[]
-    pltdata=[]
     import tqdm
-    unikey=set()
-    def getunikey(angle,mn):
-        return f"{angle:.3f}_{mn[0][0]}_{mn[0,1]}_{mn[1][0]}_{mn[1][1]}"
-    for theta in tqdm.tqdm(thetalist):   
-        try :
-            a.changetheta(theta)
-            mn,area=a.getminmnplot_v2()
-            if mn.shape==(2,2):
-                res=a.relaxwithmn(mn)
-                # key=getunikey(res.x,mn)
-                # if key in unikey:
-                #     continue
-                # unikey.add(key)
-                outs.append((res.x,area,mn))
-                pltdata.append([res.x,area])
-                if res.success:
-                    #print("success:",theta/np.pi*180,res.x/np.pi*180,mn)
-                    kexing.append((res.x,res.fun,mn))
-        except BaseException as e:
-            #print(e)
-            continue     
-    print("Founding ",len(kexing))
-    kk=0
-    informations={}
-    for k in kexing:
-        # print(kk,k[0]/np.pi*180,k[2])
-        kk+=1
-        try :
-            m=build_moire_pattern(b,b00,k[0],k[2],args.distance,relax_shift=args.needshift)
-            filename="POSCAR-{k1:.10f}-{rrr:.3f}.vasp".format(k1=k[0]*180/np.pi,rrr=k[1]*100)
-            informations0=build_moire_patterninformation(b,b00,k[0],k[2],args.distance,relax_shift=args.needshift)
-            informations0['theta']=k[0]
-            informations0['epsilon']=k[1]
-            informations[filename]=informations0
-            m.wrap()
-            m.write(os.path.join(args.output,filename),format="vasp",direct=True)
-        except BaseException as e:
-            print(e)
+
+    parser = argparse.ArgumentParser(description='Generate moiré structures')
+    parser.add_argument(
+        "files",
+        type=str,
+        nargs=2,
+        help='Input filenames [lower layer A] [upper layer B(real space rotation layer)]'
+    )
+    parser.add_argument(
+        '-o', '--output',
+        type=str,
+        default='tmpoutput',
+        help="Output directory (default: %(default)s)"
+    )
+    parser.add_argument(
+        "-r", "--range",
+        type=float,
+        default=[0, 180, 1000],
+        nargs=3,
+        help="Angle range: start end number (default: %(default)s)"
+    )
+    parser.add_argument(
+        "-e", "--epsilon",
+        type=float,
+        default=0.04,
+        help="Tolerance for lattice vector matching (epsilon). Maximum allowed relative deviation between supercell vectors when finding initial 1D matches. Controls precision of vector pairing between layers A and B. (default: %(default)s)"
+    )
+    parser.add_argument(
+        "-l", "--lepsilon",
+        type=float,
+        default=0.04,
+        help="Tolerance for overall lattice matching. Spectral norm of MN matrix where U = s_avg_inv * s_B and MN = U^T - I. Maximum elastic strain allowed in the most sensitive direction (default: %(default)s)"
+    )
+    parser.add_argument(
+        "--maxl",
+        type=float,
+        default=50,
+        help="Maximum lattice length (Angstrom) (default: %(default)s)"
+    )
+    parser.add_argument(
+        "-m", "--maxm",
+        type=int,
+        default=50,
+        help="Maximum supercell size for lower (default: %(default)s)"
+    )
+    parser.add_argument(
+        "-d","--distance",
+        type=float,
+        default=3.04432,
+        help="Interlayer distance (default: %(default)s)"
+    )
+    parser.add_argument(
+        "--max_atoms",
+        type=int,
+        default=100000,
+        help="Maximum allowed number of atoms (default: %(default)s)"
+    )
+
+    args = parser.parse_args()
+
+    if not os.path.exists(args.output):
+        os.makedirs(args.output)
+
+    # Read input files
+    upper_layer = aio.read(args.files[1])  # Upper layer
+    lower_layer = aio.read(args.files[0])  # Lower layer
+    
+    
+    print(f"Lower layer file: {args.files[0]}, lattice: {lower_layer.get_cell().lengths()}, angles: {lower_layer.get_cell().angles()}")
+    print(f"Upper layer file: {args.files[1]}, lattice: {upper_layer.get_cell().lengths()}, angles: {upper_layer.get_cell().angles()}")
+    # Assert that a,b lattice vectors are in xy-plane and c is aligned with z-axis
+    # Check that z-components of a and b vectors are near zero
+    assert np.allclose(lower_layer.get_cell()[:2, 2], 0, atol=1e-6), "Lower layer: a,b vectors must be in xy-plane"
+    assert np.allclose(upper_layer.get_cell()[:2, 2], 0, atol=1e-6), "Upper layer: a,b vectors must be in xy-plane"
+    # Check that x and y components of c vector are near zero
+    assert np.allclose(lower_layer.get_cell()[2, :2], 0, atol=1e-6), "Lower layer: c vector must be aligned with z-axis"
+    assert np.allclose(upper_layer.get_cell()[2, :2], 0, atol=1e-6), "Upper layer: c vector must be aligned with z-axis" 
+    # Calculate average atomic density
+    density_lower = len(lower_layer) / np.abs(np.linalg.det(lower_layer.get_cell().array[:2, :2]))
+    density_upper = len(upper_layer) / np.abs(np.linalg.det(upper_layer.get_cell().array[:2, :2]))
+    average_density = (density_lower + density_upper) / 2
+
+    # Initialize MoireData object
+    moire_data = MoireData(
+        lattice_A=lower_layer.get_cell().array[:2, :2],
+        lattice_B0=upper_layer.get_cell().array[:2, :2],
+        maxm=args.maxm,
+        max_lattice_length=args.maxl,
+        epsilon=args.epsilon,
+        lepsilon=args.lepsilon,
+        dtheta=0  # Will be set later
+    )
+
+    moire_data.get_all_candidates()
+
+    # Generate angle list
+    theta_list = np.linspace(
+        args.range[0] * np.pi / 180,
+        args.range[1] * np.pi / 180,
+        int(args.range[2])
+    )
+    moire_data.dtheta = theta_list[1] - theta_list[0]
+
+    print(f"Angle search range: {args.range}")
+
+    # Store valid configurations
+    valid_configurations = []
+
+    # Search for optimal configurations
+    for theta in tqdm.tqdm(theta_list, desc="Searching angles"):
+        try:
+            moire_data.set_rotation_angle(theta)
+            mn_A, area, mn_B = moire_data.find_optimal_supercell()
+
+            if mn_A.shape == (2, 2):
+                result = moire_data.relax_with_mn(mn_A)
+                if result.success:
+                    valid_configurations.append((result.x, result.fun, mn_A, area))
+        except Exception:
             continue
 
-    import json
+    print(f"Found {len(valid_configurations)} valid configurations")
 
-    if os.path.exists(os.path.join(args.output,"informations.json")):
-        with open(os.path.join(args.output,"informations.json"),'r') as f:
-            informationsold=json.load(f)
-            informations1=informationsold.update(informations)
-            informations=informationsold
-    with open(os.path.join(args.output,"informations.json"),'w') as f:
-        json.dump(informations,f)
-    # aa=(build_nsupercell(a,np.array([[2,1,0],[0,1,0],[0,0,1]])))
-    # aa.write("POSCAR.vasp")
+    # Build moiré structures
+    structure_info = {}
+
+    for config in valid_configurations:
+        try:
+            theta_opt, mismatch_value, mn_matrix, area = config
+
+            # Calculate supercell lattice vectors
+            supercell_lattice_a = np.dot(mn_matrix, lower_layer.get_cell().array[:2, :2])
+
+            # Calculate rotated upper layer lattice
+            upper_rotated = np.dot(
+                get_rotation_matrix_2d(theta_opt),
+                upper_layer.get_cell().array[:2, :2].T
+            ).T
+
+            # Calculate upper layer supercell
+            transform_matrix = np.dot(
+                mn_matrix,
+                np.dot(lower_layer.get_cell().array[:2, :2], np.linalg.inv(upper_rotated))
+            )
+            supercell_lattice_b = np.dot(np.round(transform_matrix), upper_rotated)
+
+            # Estimate number of atoms
+            moire_area = (np.abs(np.linalg.det(supercell_lattice_a)) +
+                         np.abs(np.linalg.det(supercell_lattice_b)))
+            estimated_atoms = int(moire_area * average_density)
+
+            # Check atom count limit
+            if estimated_atoms > args.max_atoms:
+                print(f"Skipping angle {theta_opt * 180 / np.pi:.2f}°, "
+                      f"estimated atoms {estimated_atoms} exceeds limit {args.max_atoms}")
+                continue
+
+            # Build moiré structure
+            moire_structure = build_moire_pattern(
+                lower_layer, upper_layer, theta_opt, mn_matrix,
+                args.distance
+            )
+
+            # Generate filename
+            filename = f"POSCAR-{theta_opt * 180 / np.pi:.10f}-{mismatch_value * 100:.3f}.vasp"
+
+            # Get structure information
+            info = get_moire_pattern_info(
+                lower_layer, upper_layer, theta_opt, mn_matrix,
+                args.distance
+            )
+            info['theta'] = theta_opt
+            info['epsilon'] = mismatch_value
+
+            # print(f"Actual atoms: {len(moire_structure)}, estimated atoms: {estimated_atoms}")
+
+            structure_info[filename] = info
+
+            # Save structure
+            moire_structure.wrap()
+            moire_structure.write(
+                os.path.join(args.output, filename),
+                format="vasp",
+                direct=True
+            )
+
+        except Exception as e:
+            print(f"Error processing configuration: {e}")
+            raise e
+            continue
+
+    # Save structure information
+    info_file = os.path.join(args.output, "informations.json")
+    if os.path.exists(info_file):
+        with open(info_file, 'r') as f:
+            existing_info = json.load(f)
+        existing_info.update(structure_info)
+        structure_info = existing_info
+
+    with open(info_file, 'w') as f:
+        json.dump(structure_info, f, indent=2)
+
 
 if __name__ == '__main__':
     main()
-    
