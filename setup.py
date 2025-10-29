@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='moiregenerate',
-    version='0.1.0',
+    version='0.2.0',
     author="zhao luneng",
     author_email="1713175349@qq.com",
     description="Generate moiré patterns for 2D material bilayer structures",
