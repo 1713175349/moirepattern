@@ -16,21 +16,11 @@ setup(
     install_requires=[
         "numpy>=1.19.0",
         "scipy>=1.7.0",
-        "matplotlib>=3.3.0",
         "ase>=3.22.0",
         "tqdm>=4.60.0",
     ],
     extras_require={
-        "dev": [
-            "pytest>=6.0",
-            "black>=21.0",
-            "flake8>=3.9",
-            "mypy>=0.910",
-        ],
-        "viz": [
-            "jupyterlab>=3.0",
-            "nglview>=3.0",
-        ],
+
     },
     classifiers=[
         "Development Status :: 3 - Alpha",
