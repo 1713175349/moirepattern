@@ -8,7 +8,7 @@ setup(
     description="Generate moiré patterns for 2D material bilayer structures",
     long_description="A Python package for generating moiré superlattice structures in 2D material bilayers. "
                     "Supports rotation angle scanning, supercell matching, and structure optimization.",
-    license="GPL3",
+    license="MIT",
     keywords=["moire pattern", "2D materials", "bilayer", "twistronics", "supercell", "materials science"],
     packages=find_packages(),
     scripts=["bin/moiregenerate-cmd"],
@@ -25,7 +25,7 @@ setup(
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Science/Research",
-        "License :: OSI Approved :: GPL3",
+        "License :: OSI Approved :: MIT",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
